@@ -1,0 +1,23 @@
+# Prometheus scrape configuration for the InvestSphere monitoring stack.
+# ------------------------------------------------------------------------------
+# Prometheus periodically scrapes the Pushgateway (where Databricks jobs push
+# their metrics) and itself (for self-monitoring).
+# ------------------------------------------------------------------------------
+
+global:
+  scrape_interval: 15s      # how often to scrape targets
+  evaluation_interval: 15s  # how often to evaluate rules (none defined here)
+
+scrape_configs:
+  # --- Pushgateway -----------------------------------------------------------
+  # honor_labels: true keeps the labels that the pipeline pushed (e.g. job),
+  # instead of Prometheus overwriting them with the scrape target's labels.
+  - job_name: "pushgateway"
+    honor_labels: true
+    static_configs:
+      - targets: ["pushgateway:9091"]
+
+  # --- Prometheus self-monitoring -------------------------------------------
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

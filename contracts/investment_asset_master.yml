@@ -1,0 +1,62 @@
+# Data Contract: investment_asset_master
+# Machine-readable agreement between the upstream producer and the InvestSphere platform.
+# Source of truth for columns/types/format: pipelines/schemas.py
+
+source: investment_asset_master
+category: reference_data
+description: >
+  Master reference list of investable assets (securities/instruments) with
+  identifiers, classification and currency. One row per asset. Used as a
+  foreign-key parent by transactions, holdings and prices.
+
+source_owner: Reference Data Mgmt
+sla: "monthly (full refresh), plus ad-hoc on new-instrument setup; availability 99.9%"
+
+format: csv
+landing_path: /Volumes/investsphere/bronze/raw/investment_asset_master/
+filename_pattern: "investment_asset_master_YYYY_MM_DD.csv"
+immutable: true
+
+bronze_table: investsphere.bronze.raw_investment_asset_master
+
+required_columns:
+  - { name: investment_asset_id,       type: string, nullable: false }
+  - { name: name,                      type: string, nullable: false }
+  - { name: asset_type,                type: string, nullable: false }
+  - { name: isin,                      type: string, nullable: true }
+  - { name: ticker,                    type: string, nullable: true }
+  - { name: internal_investment_code,  type: string, nullable: true }
+  - { name: issuer_id,                 type: string, nullable: true }
+  - { name: sector,                    type: string, nullable: true }
+  - { name: country,                   type: string, nullable: true }
+  - { name: currency,                  type: string, nullable: false }
+
+primary_key: investment_asset_id
+natural_key: investment_asset_id
+partition_field: null
+
+foreign_keys:
+  - { column: issuer_id, references: investsphere.bronze.raw_issuer_master.issuer_id }
+
+accepted_values:
+  asset_type: [EQUITY, BOND, FUND, PRIVATE, CASH, DERIVATIVE]
+  currency_note: "ISO 4217 alpha-3 currency code"
+  country_note: "ISO 3166-1 alpha-2 country code"
+
+platform_audit_columns: [_ingest_ts, _source_file, _batch_id, _rescued_data]
+
+schema_evolution:
+  policy: rescue
+  description: >
+    Bronze Auto Loader runs in schemaEvolutionMode=rescue. New, renamed, or mistyped
+    columns are captured in _rescued_data and are NOT auto-promoted into the table schema.
+  additive_columns: allowed-via-review
+  breaking_changes: not-allowed
+
+dq_rules:
+  - { id: pk_not_null,     column: investment_asset_id, rule: "investment_asset_id IS NOT NULL", tier: FAIL }
+  - { id: no_duplicate_pk, column: investment_asset_id, rule: "investment_asset_id is unique",   tier: FAIL, note: "duplicate asset_id corrupts every downstream FK join" }
+  - { id: name_present,    column: name,                rule: "name IS NOT NULL",                tier: QUARANTINE }
+  - { id: valid_asset_type,column: asset_type,          rule: "asset_type in accepted_values",   tier: QUARANTINE }
+  - { id: currency_present,column: currency,            rule: "currency IS NOT NULL and is ISO 4217", tier: QUARANTINE }
+  - { id: schema_drift,    column: _rescued_data,       rule: "_rescued_data IS NULL",           tier: QUARANTINE }

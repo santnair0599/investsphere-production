@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+.databricks/
+data/quarantine/
+
+build/
+dist/
+*.egg-info/
+
+# terraform (NEVER commit the provider cache or state; DO keep .terraform.lock.hcl)
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+!*.tfvars.example

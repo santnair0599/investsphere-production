@@ -1,0 +1,57 @@
+# Data Contract: investment_limits
+# Machine-readable agreement between the upstream producer and the InvestSphere platform.
+# Source of truth for columns/types/format: pipelines/schemas.py
+
+source: investment_limits
+category: reference_data
+description: >
+  Investment concentration/exposure limits expressed as a maximum percentage,
+  scoped to a dimension (e.g. sector, issuer, country) and optionally a portfolio.
+  One row per limit rule.
+
+source_owner: Risk & Compliance
+sla: "monthly (full refresh), plus ad-hoc on mandate/limit change; availability 99.9%"
+
+format: csv
+landing_path: /Volumes/investsphere/bronze/raw/investment_limits/
+filename_pattern: "investment_limits_YYYY_MM_DD.csv"
+immutable: true
+
+bronze_table: investsphere.bronze.raw_investment_limits
+
+required_columns:
+  - { name: limit_id,     type: string, nullable: false }
+  - { name: scope_type,   type: string, nullable: false }
+  - { name: scope_value,  type: string, nullable: false }
+  - { name: portfolio_id, type: string, nullable: true }   # null = limit applies firm-wide / all portfolios
+  - { name: max_pct,      type: double, nullable: false }
+
+primary_key: limit_id
+natural_key: limit_id
+partition_field: null
+
+foreign_keys:
+  - { column: portfolio_id, references: investsphere.bronze.raw_portfolio_master.portfolio_id }
+
+accepted_values:
+  scope_type: [SECTOR, ISSUER, COUNTRY, ASSET_TYPE, PORTFOLIO]
+  max_pct_note: "percentage between 0 and 100"
+
+platform_audit_columns: [_ingest_ts, _source_file, _batch_id, _rescued_data]
+
+schema_evolution:
+  policy: rescue
+  description: >
+    Bronze Auto Loader runs in schemaEvolutionMode=rescue. New, renamed, or mistyped
+    columns are captured in _rescued_data and are NOT auto-promoted into the table schema.
+  additive_columns: allowed-via-review
+  breaking_changes: not-allowed
+
+dq_rules:
+  - { id: pk_not_null,     column: limit_id,     rule: "limit_id IS NOT NULL", tier: FAIL }
+  - { id: no_duplicate_pk, column: limit_id,     rule: "limit_id is unique",   tier: FAIL }
+  - { id: valid_scope_type,column: scope_type,   rule: "scope_type in accepted_values", tier: QUARANTINE }
+  - { id: scope_value_present, column: scope_value, rule: "scope_value IS NOT NULL", tier: QUARANTINE }
+  - { id: pct_in_range,    column: max_pct,      rule: "max_pct >= 0 and max_pct <= 100", tier: QUARANTINE }
+  - { id: fk_portfolio,    column: portfolio_id, rule: "portfolio_id is null OR exists in portfolio_master", tier: QUARANTINE }
+  - { id: schema_drift,    column: _rescued_data,rule: "_rescued_data IS NULL", tier: QUARANTINE }

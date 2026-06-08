@@ -1,0 +1,17 @@
+# Grafana datasource provisioning.
+# ------------------------------------------------------------------------------
+# Auto-creates a Prometheus datasource on Grafana startup so no manual setup is
+# needed. The `uid: prometheus` MUST match the datasource uid referenced by the
+# dashboard panels (see grafana/dashboards/investsphere_pipeline.json).
+# ------------------------------------------------------------------------------
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus            # referenced by dashboard panels
+    type: prometheus
+    access: proxy              # Grafana server reaches Prometheus (not the browser)
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true

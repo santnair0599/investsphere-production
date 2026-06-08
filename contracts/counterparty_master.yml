@@ -1,0 +1,56 @@
+# Data Contract: counterparty_master
+# Machine-readable agreement between the upstream producer and the InvestSphere platform.
+# Source of truth for columns/types/format: pipelines/schemas.py
+
+source: counterparty_master
+category: reference_data
+description: >
+  Master reference list of trading counterparties (brokers/banks/venues) with
+  type, risk classification and country. One row per counterparty. Referenced
+  (optionally) by investment_transactions.
+
+source_owner: Reference Data Mgmt
+sla: "monthly (full refresh), plus ad-hoc on counterparty onboarding; availability 99.9%"
+
+format: csv
+landing_path: /Volumes/investsphere/bronze/raw/counterparty_master/
+filename_pattern: "counterparty_master_YYYY_MM_DD.csv"
+immutable: true
+
+bronze_table: investsphere.bronze.raw_counterparty_master
+
+required_columns:
+  - { name: counterparty_id, type: string, nullable: false }
+  - { name: name,            type: string, nullable: false }
+  - { name: type,            type: string, nullable: true }
+  - { name: risk_category,   type: string, nullable: true }
+  - { name: country,         type: string, nullable: true }
+
+primary_key: counterparty_id
+natural_key: counterparty_id
+partition_field: null
+
+foreign_keys: []
+
+accepted_values:
+  type: [BROKER, BANK, EXCHANGE, CUSTODIAN, OTHER]
+  risk_category: [LOW, MEDIUM, HIGH]
+  country_note: "ISO 3166-1 alpha-2 country code"
+
+platform_audit_columns: [_ingest_ts, _source_file, _batch_id, _rescued_data]
+
+schema_evolution:
+  policy: rescue
+  description: >
+    Bronze Auto Loader runs in schemaEvolutionMode=rescue. New, renamed, or mistyped
+    columns are captured in _rescued_data and are NOT auto-promoted into the table schema.
+  additive_columns: allowed-via-review
+  breaking_changes: not-allowed
+
+dq_rules:
+  - { id: pk_not_null,      column: counterparty_id, rule: "counterparty_id IS NOT NULL", tier: FAIL }
+  - { id: no_duplicate_pk,  column: counterparty_id, rule: "counterparty_id is unique",   tier: FAIL }
+  - { id: name_present,     column: name,            rule: "name IS NOT NULL",            tier: QUARANTINE }
+  - { id: valid_type,       column: type,            rule: "type is null OR in accepted_values", tier: WARN }
+  - { id: valid_risk,       column: risk_category,   rule: "risk_category is null OR in accepted_values", tier: WARN }
+  - { id: schema_drift,     column: _rescued_data,   rule: "_rescued_data IS NULL",       tier: QUARANTINE }

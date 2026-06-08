@@ -1,0 +1,50 @@
+# Data Contract: listed_market_prices
+# Machine-readable agreement between the upstream producer and the InvestSphere platform.
+# Source of truth for columns/types/format: pipelines/schemas.py
+
+source: listed_market_prices
+category: valuation_data
+description: >
+  End-of-day close prices for listed instruments, one row per asset per price date.
+
+source_owner: Market Data Vendor Feed
+sla: "daily by 19:00 Asia/Dubai (each market business day); availability 99.9%"
+
+format: csv
+landing_path: /Volumes/investsphere/bronze/raw/listed_market_prices/
+filename_pattern: "listed_market_prices_YYYY_MM_DD.csv"
+immutable: true
+
+bronze_table: investsphere.bronze.raw_listed_market_prices
+
+required_columns:
+  - { name: price_date,          type: string, nullable: false }   # ISO date string YYYY-MM-DD
+  - { name: investment_asset_id, type: string, nullable: false }
+  - { name: close_price,         type: double, nullable: false }
+
+primary_key: [investment_asset_id, price_date]
+natural_key: [investment_asset_id, price_date]
+partition_field: price_date
+
+foreign_keys:
+  - { column: investment_asset_id, references: investsphere.bronze.raw_investment_asset_master.investment_asset_id }
+
+accepted_values: {}   # no enumerations; close_price must be a non-negative numeric
+
+platform_audit_columns: [_ingest_ts, _source_file, _batch_id, _rescued_data]
+
+schema_evolution:
+  policy: rescue
+  description: >
+    Bronze Auto Loader runs in schemaEvolutionMode=rescue. New, renamed, or mistyped
+    columns are captured in _rescued_data and are NOT auto-promoted into the table schema.
+  additive_columns: allowed-via-review
+  breaking_changes: not-allowed
+
+dq_rules:
+  - { id: pk_not_null,       column: [investment_asset_id, price_date], rule: "natural key columns IS NOT NULL", tier: FAIL }
+  - { id: no_duplicate_pk,   column: [investment_asset_id, price_date], rule: "(investment_asset_id, price_date) is unique", tier: WARN }
+  - { id: fk_asset,          column: investment_asset_id, rule: "investment_asset_id exists in asset_master", tier: QUARANTINE }
+  - { id: price_non_negative,column: close_price,         rule: "close_price >= 0",            tier: QUARANTINE }
+  - { id: schema_drift,      column: _rescued_data,       rule: "_rescued_data IS NULL",       tier: QUARANTINE }
+  - { id: freshness,         column: price_date,          rule: "feed date == pipeline run date", tier: WARN }

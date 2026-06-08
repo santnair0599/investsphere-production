@@ -1,0 +1,54 @@
+# Data Contract: portfolio_master
+# Machine-readable agreement between the upstream producer and the InvestSphere platform.
+# Source of truth for columns/types/format: pipelines/schemas.py
+
+source: portfolio_master
+category: reference_data
+description: >
+  Master reference list of investment portfolios, their managers, mandates and
+  base reporting currency. One row per portfolio. Used as a foreign-key parent
+  by transactions and holdings.
+
+source_owner: Reference Data Mgmt
+sla: "monthly (full refresh), plus ad-hoc on portfolio onboarding/changes; availability 99.9%"
+
+format: csv
+landing_path: /Volumes/investsphere/bronze/raw/portfolio_master/
+filename_pattern: "portfolio_master_YYYY_MM_DD.csv"
+immutable: true
+
+bronze_table: investsphere.bronze.raw_portfolio_master
+
+required_columns:
+  - { name: portfolio_id,   type: string, nullable: false }
+  - { name: portfolio_name, type: string, nullable: false }
+  - { name: manager,        type: string, nullable: true }
+  - { name: mandate,        type: string, nullable: true }
+  - { name: base_currency,  type: string, nullable: false }
+
+primary_key: portfolio_id
+natural_key: portfolio_id
+partition_field: null   # reference dimension, no natural date partition
+
+foreign_keys: []
+
+accepted_values:
+  # base_currency must be a valid ISO 4217 alpha-3 code (e.g. USD, EUR, GBP, AED, JPY).
+  base_currency_note: "ISO 4217 alpha-3 currency code"
+
+platform_audit_columns: [_ingest_ts, _source_file, _batch_id, _rescued_data]
+
+schema_evolution:
+  policy: rescue
+  description: >
+    Bronze Auto Loader runs in schemaEvolutionMode=rescue. New, renamed, or mistyped
+    columns are captured in _rescued_data and are NOT auto-promoted into the table schema.
+  additive_columns: allowed-via-review
+  breaking_changes: not-allowed
+
+dq_rules:
+  - { id: pk_not_null,      column: portfolio_id,   rule: "portfolio_id IS NOT NULL", tier: FAIL }
+  - { id: no_duplicate_pk,  column: portfolio_id,   rule: "portfolio_id is unique",   tier: FAIL, note: "duplicate portfolio_id corrupts every downstream FK join" }
+  - { id: name_present,     column: portfolio_name, rule: "portfolio_name IS NOT NULL", tier: QUARANTINE }
+  - { id: currency_present, column: base_currency,  rule: "base_currency IS NOT NULL and is ISO 4217", tier: QUARANTINE }
+  - { id: schema_drift,     column: _rescued_data,  rule: "_rescued_data IS NULL",     tier: QUARANTINE }

@@ -1,0 +1,164 @@
+name: CD (Databricks Bundle)
+
+# Continuous DEPLOYMENT for the InvestSphere Databricks Asset Bundle.
+#
+# What this does, in plain English:
+#   * Push to the `develop` branch  -> deploy the bundle to the DEV target.
+#   * Push to the `main`    branch  -> deploy the bundle to the PROD target,
+#                                      but only AFTER a human approves it.
+#
+# Each environment deploy: checkout -> install the Databricks CLI -> build the
+# platform wheel -> `bundle validate` -> `bundle deploy` -> a post-deploy SMOKE
+# TEST (we run the investsphere_eod job once to prove the deploy is healthy).
+#
+# ---------------------------------------------------------------------------
+# GitHub configuration you MUST do once before this workflow can run
+# ---------------------------------------------------------------------------
+# This uses a Databricks SERVICE PRINCIPAL with OAuth machine-to-machine (M2M)
+# authentication -- NOT a personal access token. The Databricks CLI reads three
+# environment variables and exchanges the client id/secret for a short-lived
+# OAuth token automatically:
+#     DATABRICKS_HOST           e.g. https://dbc-d3c7f717-df2a.cloud.databricks.com
+#     DATABRICKS_CLIENT_ID      the service principal's OAuth client id (UUID)
+#     DATABRICKS_CLIENT_SECRET  the service principal's OAuth secret
+#
+# Store these as **GitHub Environment secrets** (Settings -> Environments), so
+# DEV and PROD get DIFFERENT credentials and PROD can require approval:
+#
+#   1. Create a GitHub Environment named `dev`.
+#        - Add secrets: DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET
+#          (pointing at the dev service principal / workspace).
+#
+#   2. Create a GitHub Environment named `prod`.
+#        - Add the same three secret NAMES with the PROD service principal's values.
+#        - Under "Deployment protection rules", enable **Required reviewers** and add
+#          the people who must approve a production deploy. This is what forces the
+#          MANUAL APPROVAL gate before the prod job runs.
+#
+# The service principal needs CAN_MANAGE on the bundle's jobs/pipeline and the
+# usual Unity Catalog grants (USE CATALOG investsphere, etc.) to deploy + run.
+# ---------------------------------------------------------------------------
+
+on:
+  push:
+    branches:
+      - develop   # -> triggers the DEV deploy job
+      - main      # -> triggers the PROD deploy job (gated by approval)
+
+# Don't let two deploys to the same branch race each other; cancel the older one.
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false   # never cancel a deploy mid-flight; just queue
+
+jobs:
+
+  # =========================================================================
+  # DEV deploy -- runs on every push to `develop`.
+  # =========================================================================
+  deploy-dev:
+    # Only run this job for the develop branch.
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    # Binds this job to the GitHub Environment `dev`, so it reads the dev secrets.
+    environment: dev
+    env:
+      # OAuth M2M: the CLI auto-detects these and mints a token -- no PAT needed.
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+    steps:
+      # 1. Pull the repo at the pushed commit.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Install the official Databricks CLI (provides `databricks bundle ...`).
+      #    Alternative without the action:
+      #      pip install databricks-cli   # (the new unified CLI, not the legacy one)
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@main
+
+      # 3. Python is needed to build the platform wheel below.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 4. Build the reusable platform wheel BEFORE deploy. The bundle's
+      #    `artifacts` block references ./dist/investsphere_platform-0.1.0-...whl,
+      #    so it must exist on disk for `bundle deploy` to upload it. (The bundle
+      #    can also build it itself, but building here makes failures obvious in CI.)
+      - name: Build platform wheel
+        run: python -m pip wheel . --no-deps -w dist
+
+      # 5. Validate the bundle definition against the dev target (catches schema /
+      #    reference errors before we touch the workspace).
+      - name: Validate bundle (dev)
+        run: databricks bundle validate -t dev
+
+      # 6. Deploy all bundle resources (jobs, Lakeflow pipeline, wheel) to dev.
+      - name: Deploy bundle (dev)
+        run: databricks bundle deploy -t dev
+
+      # 7. POST-DEPLOY SMOKE TEST -- prove the freshly deployed bundle actually runs.
+      #    We trigger the EOD job once and wait for it to finish (the CLI blocks until
+      #    completion and returns non-zero if the run fails, which fails this step).
+      - name: Smoke test (dev) -- run EOD job
+        run: databricks bundle run investsphere_eod -t dev
+        # --- HOW TO SWAP TO pytest INTEGRATION TESTS INSTEAD ---
+        # If you'd rather validate via the integration smoke tests
+        # (tests/integration/test_databricks_smoke.py) -- which query the deployed
+        # objects through a SQL warehouse -- replace the `run:` above with:
+        #
+        #   run: |
+        #     pip install -r requirements.txt
+        #     pytest tests/integration -q
+        #   env:
+        #     DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+        #     DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+        #     DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+        #     DATABRICKS_WAREHOUSE_ID: ${{ secrets.DATABRICKS_WAREHOUSE_ID }}  # add this secret
+        #     DATABRICKS_CATALOG: investsphere
+
+  # =========================================================================
+  # PROD deploy -- runs on every push to `main`, AFTER manual approval.
+  # =========================================================================
+  deploy-prod:
+    # Only run this job for the main branch.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Binding to the `prod` GitHub Environment does two things:
+    #   (a) reads the PROD service-principal secrets, and
+    #   (b) ENFORCES the "Required reviewers" protection rule -> this job pauses
+    #       and waits for a human to approve before any step runs.
+    environment: prod
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Build the wheel so the bundle `artifacts` block has it to upload.
+      - name: Build platform wheel
+        run: python -m pip wheel . --no-deps -w dist
+
+      - name: Validate bundle (prod)
+        run: databricks bundle validate -t prod
+
+      - name: Deploy bundle (prod)
+        run: databricks bundle deploy -t prod
+
+      # POST-DEPLOY SMOKE TEST in production -- same pattern as dev.
+      # Triggers one EOD run; a failed run fails the deploy so you know immediately.
+      # (To swap to pytest integration tests, use the same block shown in the dev job.)
+      - name: Smoke test (prod) -- run EOD job
+        run: databricks bundle run investsphere_eod -t prod

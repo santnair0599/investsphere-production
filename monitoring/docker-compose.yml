@@ -1,0 +1,74 @@
+# InvestSphere monitoring stack
+# ------------------------------------------------------------------------------
+# Brings up the OUTSIDE-Databricks observability stack with one command:
+#
+#     docker compose up -d
+#
+# Flow:
+#   Databricks job  --(push_metrics)-->  Pushgateway  <--(scrape)--  Prometheus  <--(query)--  Grafana
+#
+# Databricks jobs are short-lived, so the pipeline PUSHES metrics to the
+# Pushgateway (see src/investsphere_platform/monitoring/prometheus_exporter.py).
+# Prometheus scrapes the Pushgateway; Grafana reads from Prometheus.
+#
+# Exposed ports (host -> container):
+#   - Pushgateway : 9091  (point export_pipeline_metrics.py --pushgateway_url here)
+#   - Prometheus  : 9090
+#   - Grafana     : 3000  (admin / admin by default -- CHANGE IN PROD)
+# ------------------------------------------------------------------------------
+
+services:
+  # Receives pushed metrics from short-lived Databricks jobs and holds them
+  # so Prometheus can scrape them. honor_labels keeps the job label we push.
+  pushgateway:
+    image: prom/pushgateway:v1.9.0
+    container_name: investsphere-pushgateway
+    ports:
+      - "9091:9091"
+    restart: unless-stopped
+
+  # Scrapes the Pushgateway (and itself) and stores the time series.
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: investsphere-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      # Scrape configuration (read-only).
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Persistent TSDB storage.
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    depends_on:
+      - pushgateway
+    restart: unless-stopped
+
+  # Dashboards. Datasource + dashboards are auto-provisioned (no manual setup).
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: investsphere-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      # Default admin credentials -- CHANGE IN PRODUCTION.
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      # Disable anonymous access; require login.
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      # Datasource + dashboard provider definitions (read-only).
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      # Dashboard JSON files that the provider auto-loads (read-only).
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      # Persistent Grafana state (users, prefs, etc.).
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+# Named volumes keep Prometheus TSDB + Grafana state across restarts.
+volumes:
+  prometheus_data:
+  grafana_data:

@@ -1,0 +1,54 @@
+# Data Contract: investment_holdings_snapshot
+# Machine-readable agreement between the upstream producer and the InvestSphere platform.
+# Source of truth for columns/types/format: pipelines/schemas.py
+
+source: investment_holdings_snapshot
+category: valuation_data
+description: >
+  Point-in-time position quantities per portfolio per asset, as of a snapshot date.
+  One row per (portfolio, asset) per as_of_date.
+
+source_owner: Portfolio Accounting
+sla: "daily by 18:00 Asia/Dubai (each business day); availability 99.5%"
+
+format: csv
+landing_path: /Volumes/investsphere/bronze/raw/investment_holdings_snapshot/
+filename_pattern: "investment_holdings_snapshot_YYYY_MM_DD.csv"
+immutable: true
+
+bronze_table: investsphere.bronze.raw_investment_holdings_snapshot
+
+required_columns:
+  - { name: portfolio_id,        type: string, nullable: false }
+  - { name: as_of_date,          type: string, nullable: false }   # ISO date string YYYY-MM-DD
+  - { name: investment_asset_id, type: string, nullable: false }
+  - { name: quantity,            type: double, nullable: false }
+
+primary_key: [portfolio_id, as_of_date, investment_asset_id]
+natural_key: [portfolio_id, as_of_date, investment_asset_id]
+partition_field: as_of_date
+
+foreign_keys:
+  - { column: portfolio_id,        references: investsphere.bronze.raw_portfolio_master.portfolio_id }
+  - { column: investment_asset_id, references: investsphere.bronze.raw_investment_asset_master.investment_asset_id }
+
+accepted_values: {}   # quantity may be 0 (flat position); negative indicates a short -> review per mandate
+
+platform_audit_columns: [_ingest_ts, _source_file, _batch_id, _rescued_data]
+
+schema_evolution:
+  policy: rescue
+  description: >
+    Bronze Auto Loader runs in schemaEvolutionMode=rescue. New, renamed, or mistyped
+    columns are captured in _rescued_data and are NOT auto-promoted into the table schema.
+  additive_columns: allowed-via-review
+  breaking_changes: not-allowed
+
+dq_rules:
+  - { id: pk_not_null,     column: [portfolio_id, as_of_date, investment_asset_id], rule: "natural key columns IS NOT NULL", tier: FAIL }
+  - { id: no_duplicate_pk, column: [portfolio_id, as_of_date, investment_asset_id], rule: "natural key combination is unique", tier: WARN }
+  - { id: fk_portfolio,    column: portfolio_id,        rule: "portfolio_id exists in portfolio_master", tier: QUARANTINE }
+  - { id: fk_asset,        column: investment_asset_id, rule: "investment_asset_id exists in asset_master", tier: QUARANTINE }
+  - { id: quantity_present,column: quantity,            rule: "quantity IS NOT NULL", tier: QUARANTINE }
+  - { id: schema_drift,    column: _rescued_data,       rule: "_rescued_data IS NULL", tier: QUARANTINE }
+  - { id: freshness,       column: as_of_date,          rule: "snapshot date == pipeline run date", tier: WARN }

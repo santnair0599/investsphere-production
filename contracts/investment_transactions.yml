@@ -1,0 +1,66 @@
+# Data Contract: investment_transactions
+# Machine-readable agreement between the upstream producer and the InvestSphere platform.
+# Source of truth for columns/types/format: pipelines/schemas.py
+
+source: investment_transactions
+category: transaction_data
+description: >
+  Buy/sell/acquisition/disposal trade events booked across all portfolios.
+  One row per executed transaction.
+
+source_owner: Trading Systems
+sla: "daily by 17:30 Asia/Dubai (every trading day); availability 99.5%"
+
+format: json
+landing_path: /Volumes/investsphere/bronze/raw/investment_transactions/
+filename_pattern: "investment_transactions_YYYY_MM_DD.json"
+immutable: true   # files are dated and never overwritten; corrections arrive as new dated files
+
+bronze_table: investsphere.bronze.raw_investment_transactions
+
+# Business columns delivered by the producer (audit columns are added by the platform, see below).
+required_columns:
+  - { name: transaction_id,      type: string, nullable: false }
+  - { name: transaction_date,    type: string, nullable: false }   # ISO date string YYYY-MM-DD
+  - { name: portfolio_id,        type: string, nullable: false }
+  - { name: investment_asset_id, type: string, nullable: false }
+  - { name: transaction_type,    type: string, nullable: false }
+  - { name: quantity,            type: double, nullable: false }
+  - { name: price,               type: double, nullable: false }
+  - { name: counterparty_id,     type: string, nullable: true }    # optional -> WARN only, row kept
+
+primary_key: transaction_id
+natural_key: transaction_id
+partition_field: transaction_date
+
+foreign_keys:
+  - { column: portfolio_id,        references: investsphere.bronze.raw_portfolio_master.portfolio_id }
+  - { column: investment_asset_id, references: investsphere.bronze.raw_investment_asset_master.investment_asset_id }
+  - { column: counterparty_id,     references: investsphere.bronze.raw_counterparty_master.counterparty_id }
+
+accepted_values:
+  transaction_type: [BUY, SELL, ACQUISITION, DISPOSAL]
+
+# Audit columns the platform stamps on every Bronze row (NOT supplied by the producer):
+#   _ingest_ts (timestamp), _source_file (string), _batch_id (string)
+# Auto Loader rescue adds: _rescued_data (string) -> non-null means schema drift to review.
+platform_audit_columns: [_ingest_ts, _source_file, _batch_id, _rescued_data]
+
+schema_evolution:
+  policy: rescue
+  description: >
+    Bronze Auto Loader runs in schemaEvolutionMode=rescue. New, renamed, or mistyped
+    columns are captured in _rescued_data and are NOT auto-promoted into the table schema.
+  additive_columns: allowed-via-review   # engineer reviews _rescued_data, then updates schemas.py
+  breaking_changes: not-allowed          # dropping/renaming/retyping a required column is a contract breach
+
+dq_rules:
+  - { id: pk_not_null,        column: transaction_id,             rule: "transaction_id IS NOT NULL",                tier: FAIL,       note: "primary key missing stops the Silver job" }
+  - { id: no_duplicate_pk,    column: transaction_id,             rule: "transaction_id is unique (latest by _ingest_ts wins)", tier: WARN, note: "Silver dedupes; persistent dupes raised to producer" }
+  - { id: fk_portfolio,       column: portfolio_id,               rule: "portfolio_id exists in portfolio_master",  tier: QUARANTINE }
+  - { id: fk_asset,           column: investment_asset_id,        rule: "investment_asset_id exists in asset_master", tier: QUARANTINE }
+  - { id: positive_quantity,  column: quantity,                   rule: "quantity > 0",                              tier: QUARANTINE }
+  - { id: valid_type,         column: transaction_type,           rule: "transaction_type in accepted_values",       tier: QUARANTINE }
+  - { id: schema_drift,       column: _rescued_data,              rule: "_rescued_data IS NULL",                     tier: QUARANTINE }
+  - { id: fk_counterparty,    column: counterparty_id,            rule: "counterparty_id exists in counterparty_master", tier: WARN, note: "optional FK; missing/unknown does not block the row" }
+  - { id: freshness,          column: transaction_date,           rule: "feed date == pipeline run date",            tier: WARN, note: "stale feed flagged in EOD readiness check" }

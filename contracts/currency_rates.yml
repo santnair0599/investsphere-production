@@ -1,0 +1,53 @@
+# Data Contract: currency_rates
+# Machine-readable agreement between the upstream producer and the InvestSphere platform.
+# Source of truth for columns/types/format: pipelines/schemas.py
+
+source: currency_rates
+category: reference_data
+description: >
+  Daily FX conversion rates from each quoted currency to the reporting base
+  currency. One row per currency per rate date.
+
+source_owner: Treasury/FX
+sla: "daily by 17:00 Asia/Dubai (each business day); availability 99.9%"
+
+format: csv
+landing_path: /Volumes/investsphere/bronze/raw/currency_rates/
+filename_pattern: "currency_rates_YYYY_MM_DD.csv"
+immutable: true
+
+bronze_table: investsphere.bronze.raw_currency_rates
+
+required_columns:
+  - { name: rate_date,    type: string, nullable: false }   # ISO date string YYYY-MM-DD
+  - { name: currency,     type: string, nullable: false }   # ISO 4217 alpha-3 quoted currency
+  - { name: rate_to_base, type: double, nullable: false }
+
+# Schema has no explicit ccy_pair column; the natural key is (currency, rate_date),
+# i.e. one rate per quoted currency to the base currency per day.
+primary_key: [currency, rate_date]
+natural_key: [currency, rate_date]
+partition_field: rate_date
+
+foreign_keys: []
+
+accepted_values:
+  currency_note: "ISO 4217 alpha-3 currency code; base currency itself has rate_to_base = 1.0"
+
+platform_audit_columns: [_ingest_ts, _source_file, _batch_id, _rescued_data]
+
+schema_evolution:
+  policy: rescue
+  description: >
+    Bronze Auto Loader runs in schemaEvolutionMode=rescue. New, renamed, or mistyped
+    columns are captured in _rescued_data and are NOT auto-promoted into the table schema.
+  additive_columns: allowed-via-review
+  breaking_changes: not-allowed
+
+dq_rules:
+  - { id: pk_not_null,     column: [currency, rate_date], rule: "currency and rate_date IS NOT NULL", tier: FAIL }
+  - { id: no_duplicate_pk, column: [currency, rate_date], rule: "(currency, rate_date) is unique",     tier: WARN }
+  - { id: rate_positive,   column: rate_to_base,          rule: "rate_to_base > 0",                     tier: QUARANTINE }
+  - { id: currency_present,column: currency,              rule: "currency IS NOT NULL and is ISO 4217", tier: QUARANTINE }
+  - { id: schema_drift,    column: _rescued_data,         rule: "_rescued_data IS NULL",                tier: QUARANTINE }
+  - { id: freshness,       column: rate_date,             rule: "feed date == pipeline run date",       tier: WARN }
