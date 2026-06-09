@@ -73,13 +73,15 @@ KEY_TABLES = {
 
 # The only documents that are allowed to have been indexed for RAG. Anything
 # else (especially the committee memo) means the governance boundary leaked.
+# These are LOGICAL doc names (stem before the _YYYY_MM_DD.pdf suffix), matching how
+# ai/0{1,3}_*.py store policy_chunks.doc_name.
 APPROVED_RAG_DOCS = {
-    "investment_policy_statement.pdf",
-    "portfolio_risk_guidelines.pdf",
-    "listed_equity_research_note.pdf",
+    "investment_policy_statement",
+    "portfolio_risk_guidelines",
+    "listed_equity_research_note",
 }
 RESTRICTED_RAG_DOCS = {
-    "private_investment_committee_memo.pdf",
+    "private_investment_committee_memo",
 }
 
 

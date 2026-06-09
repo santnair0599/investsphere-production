@@ -46,15 +46,17 @@ import pytest
 
 CATALOG = "investsphere"
 
-# Documents that are explicitly cleared for retrieval.
+# Documents that are explicitly cleared for retrieval. These are LOGICAL doc names
+# (the stem before the _YYYY_MM_DD.pdf suffix) -- ai/0{1,3}_*.py key policy_chunks.doc_name
+# on the logical name so date-stamped re-uploads update in place.
 APPROVED_RAG_DOCS = {
-    "investment_policy_statement.pdf",
-    "portfolio_risk_guidelines.pdf",
-    "listed_equity_research_note.pdf",
+    "investment_policy_statement",
+    "portfolio_risk_guidelines",
+    "listed_equity_research_note",
 }
 
-# The confidential document that must NEVER be indexed.
-RESTRICTED_DOC = "private_investment_committee_memo.pdf"
+# The confidential document that must NEVER be indexed (logical name, as stored in doc_name).
+RESTRICTED_DOC = "private_investment_committee_memo"
 
 
 def _missing_env_vars():
