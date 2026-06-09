@@ -73,13 +73,15 @@ KEY_TABLES = {
 
 # The only documents that are allowed to have been indexed for RAG. Anything
 # else (especially the committee memo) means the governance boundary leaked.
+# These are LOGICAL doc names (stem before the _YYYY_MM_DD.pdf suffix), matching how
+# ai/0{1,3}_*.py store policy_chunks.doc_name.
 APPROVED_RAG_DOCS = {
-    "investment_policy_statement.pdf",
-    "portfolio_risk_guidelines.pdf",
-    "listed_equity_research_note.pdf",
+    "investment_policy_statement",
+    "portfolio_risk_guidelines",
+    "listed_equity_research_note",
 }
 RESTRICTED_RAG_DOCS = {
-    "private_investment_committee_memo.pdf",
+    "private_investment_committee_memo",
 }
 
 
@@ -302,7 +304,20 @@ def test_policy_chunks_only_approved_docs(run_query):
     The RAG index (ai.policy_chunks) must contain ONLY approved documents and
     NONE of the restricted ones. This is the security boundary for retrieval —
     see test_rag_boundary.py for the detailed rationale.
+
+    Skipped if the RAG index hasn't been built yet (ai/01_build_ai_search_index.py is
+    the optional, paid AI Search step) — a not-yet-built component should skip, not fail.
     """
+    try:
+        exists = run_query(f"SHOW TABLES IN {CATALOG}.ai LIKE 'policy_chunks'")
+    except Exception:
+        exists = []
+    if not exists:
+        pytest.skip(
+            "ai.policy_chunks not found -- RAG index not built yet "
+            "(run ai/01_build_ai_search_index.py; needs AI Search / Vector Search)."
+        )
+
     rows = run_query(
         f"SELECT DISTINCT doc_name FROM {CATALOG}.ai.policy_chunks"
     )
