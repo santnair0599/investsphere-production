@@ -26,10 +26,15 @@ targets:
   dev:
     mode: development
     default: true
-    workspace: { host: https://dbc-d3c7f717-df2a.cloud.databricks.com }
+    workspace: { host: https://adb-7405615988459162.2.azuredatabricks.net }   # Azure dev workspace
+    variables:
+      # get with: databricks warehouses list   (needed by the EOD dq_checks task at RUN time)
+      warehouse_id: "a66c9b38cc4ef9b3"
+      oncall_email: "santnair0599@gmail.com"
+  # prod left as a placeholder -- do NOT configure until dev works end-to-end
   prod:
     mode: production
-    workspace: { host: https://dbc-d3c7f717-df2a.cloud.databricks.com }
+    workspace: { host: https://REPLACE-WITH-PROD-WORKSPACE.azuredatabricks.net }
 
 # HA: failure / slow-run alerts, reused by every job (recipient = the oncall_email var).
 _notify: &notify
@@ -213,6 +218,7 @@ resources:
             dependencies:
               - ./dist/investsphere_platform-0.1.0-py3-none-any.whl
               - pypdf>=4.0
+              - databricks-vectorsearch>=0.40   # provides databricks.vector_search.client
       tasks:
         - task_key: refresh_rag
           environment_key: default

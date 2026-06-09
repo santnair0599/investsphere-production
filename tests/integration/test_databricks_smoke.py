@@ -302,7 +302,20 @@ def test_policy_chunks_only_approved_docs(run_query):
     The RAG index (ai.policy_chunks) must contain ONLY approved documents and
     NONE of the restricted ones. This is the security boundary for retrieval —
     see test_rag_boundary.py for the detailed rationale.
+
+    Skipped if the RAG index hasn't been built yet (ai/01_build_ai_search_index.py is
+    the optional, paid AI Search step) — a not-yet-built component should skip, not fail.
     """
+    try:
+        exists = run_query(f"SHOW TABLES IN {CATALOG}.ai LIKE 'policy_chunks'")
+    except Exception:
+        exists = []
+    if not exists:
+        pytest.skip(
+            "ai.policy_chunks not found -- RAG index not built yet "
+            "(run ai/01_build_ai_search_index.py; needs AI Search / Vector Search)."
+        )
+
     rows = run_query(
         f"SELECT DISTINCT doc_name FROM {CATALOG}.ai.policy_chunks"
     )

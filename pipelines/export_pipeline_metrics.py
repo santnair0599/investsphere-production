@@ -190,12 +190,22 @@ metrics["bronze_rescued_rows"] = total_rescued_rows
 # -------------------------------------------------------
 # 10. Push metrics to Prometheus Pushgateway
 # -------------------------------------------------------
+# Monitoring is BEST-EFFORT: if the Pushgateway is unreachable (not deployed, wrong URL,
+# or no network route from serverless compute), we WARN and continue. A monitoring sink
+# being down must never fail the data pipeline. The metrics also land in
+# governance.dq_results, so observability isn't lost.
 
-number_of_metrics_pushed = push_metrics(
-    metrics,
-    job_name="investsphere_eod",
-    gateway_url=PUSHGATEWAY_URL
-)
+try:
+    number_of_metrics_pushed = push_metrics(
+        metrics,
+        job_name="investsphere_eod",
+        gateway_url=PUSHGATEWAY_URL
+    )
+except Exception as push_error:
+    number_of_metrics_pushed = 0
+    print("WARNING: could not push metrics to Pushgateway at", PUSHGATEWAY_URL,
+          "->", repr(push_error))
+    print("Continuing -- metrics push is optional (see docs/MONITORING_EXTERNAL.md).")
 
 
 # -------------------------------------------------------
