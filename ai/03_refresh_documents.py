@@ -95,27 +95,30 @@ else:
         .execute())
 
     # Trigger the AI Search Delta-sync index to pick up the changed chunks.
-    # A freshly-created TRIGGERED index is still PROVISIONING (and runs an initial sync
-    # of all rows on creation), so an explicit sync() now would raise
-    # "BadRequest: ... is not ready". Wait for it to come ONLINE, then sync; if it's
-    # still not ready, skip rather than fail the job -- the data is already MERGEd into
-    # the source table and the index will pick it up on its next sync.
-    index = VectorSearchClient().get_index(endpoint_name=ENDPOINT, index_name=INDEX_NAME)
-
-    # Best-effort wait for provisioning to finish, if the SDK exposes a waiter.
-    # (Method/signature varies across databricks-vectorsearch vs databricks-ai-search,
-    # so guard it -- a missing or differently-shaped waiter must not fail the job.)
-    waiter = getattr(index, "wait_until_ready", None)
-    if waiter is not None:
-        try:
-            waiter(verbose=True, timeout=datetime.timedelta(minutes=20))
-        except Exception as err:
-            print(f"index readiness wait did not complete: {err}")
-
+    # The index is an OPTIONAL, paid AI Search layer created once by
+    # ai/01_build_ai_search_index.py. This refresh job must NOT hard-fail when that
+    # layer isn't set up or isn't ready -- the data is already MERGEd into the source
+    # table, and a TRIGGERED index will pick it up on its next sync. We therefore guard
+    # the whole acquire->wait->sync sequence and treat any failure as a skip:
+    #   * NotFound   -> index not built yet (01 hasn't run on this workspace)
+    #   * BadRequest -> index still PROVISIONING (it also runs an initial sync on create)
     try:
+        index = VectorSearchClient().get_index(endpoint_name=ENDPOINT, index_name=INDEX_NAME)
+
+        # Best-effort wait for provisioning to finish, if the SDK exposes a waiter.
+        # (Method/signature varies across databricks-vectorsearch vs databricks-ai-search,
+        # so guard it -- a missing or differently-shaped waiter must not fail the job.)
+        waiter = getattr(index, "wait_until_ready", None)
+        if waiter is not None:
+            try:
+                waiter(verbose=True, timeout=datetime.timedelta(minutes=20))
+            except Exception as err:
+                print(f"index readiness wait did not complete: {err}")
+
         index.sync()
         print(f"{len(rows)} chunks merged into Delta + AI Search index sync triggered")
     except Exception as err:
         print(f"{len(rows)} chunks merged into Delta; index sync skipped "
-              f"(index not ready yet: {err}). It will sync once provisioning completes "
-              f"or on the next upload.")
+              f"({type(err).__name__}: {err}). Build the index with "
+              f"ai/01_build_ai_search_index.py (one-time, needs AI Search), or wait for "
+              f"provisioning -- a TRIGGERED index syncs from the source table on its next run.")
